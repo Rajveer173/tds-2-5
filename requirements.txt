@@ -1,4 +1,3 @@
-flask
-Flask
-gunicorn
+fastapi
+uvicorn
 gunicorn
