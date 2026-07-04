@@ -1,52 +1,53 @@
-from flask import Flask, request, jsonify
-
-app = Flask(__name__)
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from collections import defaultdict
 
 API_KEY = "ak_0cplurm6gxeovhk8q32qavz3"
-EMAIL = "23f3000717@ds.study.iitm.ac.in"  
+EMAIL = "23f3000717@ds.study.iitm.ac.in"
 
-@app.after_request
-def add_cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "X-API-Key, Content-Type"
-    resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-    return resp
+app = FastAPI()
 
-@app.route("/analytics", methods=["POST", "OPTIONS"])
-def analytics():
-    if request.method == "OPTIONS":
-        return "", 204
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # or the exam domain
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    key = request.headers.get("X-API-Key")
-    if key != API_KEY:
-        return jsonify({"error": "unauthorized"}), 401
+class Event(BaseModel):
+    user: str
+    amount: float
+    ts: int
 
-    data = request.get_json(force=True, silent=True) or {}
-    events = data.get("events", [])
+class RequestBody(BaseModel):
+    events: list[Event]
 
-    total_events = len(events)
-    users = set()
-    revenue = 0.0
-    user_totals = {}
 
-    for e in events:
-        user = e.get("user")
-        amount = e.get("amount", 0) or 0
-        if user is not None:
-            users.add(user)
-        if amount > 0:
-            revenue += amount
-            user_totals[user] = user_totals.get(user, 0.0) + amount
+@app.post("/analytics")
+def analytics(
+    body: RequestBody,
+    x_api_key: str = Header(None)
+):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    top_user = max(user_totals, key=user_totals.get) if user_totals else None
+    total_events = len(body.events)
+    unique_users = len({e.user for e in body.events})
+    revenue = sum(e.amount for e in body.events if e.amount > 0)
 
-    return jsonify({
+    totals = defaultdict(float)
+    for e in body.events:
+        if e.amount > 0:
+            totals[e.user] += e.amount
+
+    top_user = max(totals.items(), key=lambda x: x[1])[0] if totals else ""
+
+    return {
         "email": EMAIL,
         "total_events": total_events,
-        "unique_users": len(users),
-        "revenue": round(revenue, 2),
-        "top_user": top_user
-    })
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+        "unique_users": unique_users,
+        "revenue": revenue,
+        "top_user": top_user,
+    }
